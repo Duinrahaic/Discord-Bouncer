@@ -1,0 +1,11 @@
+services:
+  discord-bouncer:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - bouncer-data:/app/data
+
+volumes:
+  bouncer-data:
