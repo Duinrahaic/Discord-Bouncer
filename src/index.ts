@@ -90,9 +90,19 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.reply({ content: 'Only the server owner can use this command.', flags: MessageFlags.Ephemeral });
       return;
     }
-    const channel = interaction.options.getChannel('channel', true);
+    const channel = interaction.options.getChannel('channel', true, [ChannelType.GuildText]);
     const phrase  = interaction.options.getString('phrase', true);
     const role    = interaction.options.getRole('role', true);
+
+    const botMember = interaction.guild!.members.me;
+    const perms = botMember ? channel.permissionsFor(botMember) : null;
+    if (!perms?.has(PermissionFlagsBits.ViewChannel) || !perms.has(PermissionFlagsBits.ManageMessages)) {
+      await interaction.reply({
+        content: `I need "View Channel" and "Manage Messages" permissions in <#${channel.id}> to run verification there.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
 
     setSetting(guildId, 'support_channel_id', channel.id);
     setSetting(guildId, 'support_phrase', phrase);
