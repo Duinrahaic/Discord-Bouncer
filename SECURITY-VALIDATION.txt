@@ -1,0 +1,92 @@
+Discord Bouncer security remediation and local validation
+Date: 2026-10-21
+Branch: security/october-2026-review
+Base revision: aa5f22c7f6d7e79669c872b0e649c763be6e4dcd
+Implementation validation snapshot; subsequent release status is in the PR/thread.
+Upstream master matched this base when checked with git ls-remote.
+
+Changed files
+- Dockerfile: both stages pin node:22.23.4-alpine instead of node:22-alpine.
+- package-lock.json: normal, non-force npm audit remediation within existing
+  manifest ranges. discord.js 14.26.4 -> 14.27.0; @discordjs/rest 2.6.1 -> 2.6.3;
+  npm Undici 6.24.1 -> 6.29.1; esbuild 0.28.0 -> 0.28.2 (including platform
+  packages); discord-api-types 0.38.47 -> 0.38.57; snowflake deduplicated at 3.5.5.
+- package.json: npm test builds and runs Node's built-in test runner.
+- test/runtime.test.cjs: offline compiled-startup and native SQLite integration
+  tests, using disposable temporary directories. Checks missing-token exit before
+  database creation, settings/guild isolation, parameterized apostrophe handling,
+  log ordering, boolean mapping and per-guild 1000-entry retention.
+- SECURITY-VALIDATION.txt: this evidence and handoff.
+No production application source behavior changed.
+
+Verified sources
+https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
+https://nodejs.org/en/blog/release/v22.23.4/
+https://raw.githubusercontent.com/nodejs/docker-node/main/versions.json
+https://github.com/nodejs/undici/security/advisories/GHSA-rfgv-xxqx-mfg5
+https://github.com/evanw/esbuild/security/advisories/GHSA-g7r4-m6w7-qqqr
+The official Node advisory identifies 22.23.4 as the patched 22.x release.
+The Docker registry manifest and successful pull/build verified the tag exists.
+Reviewed prior personal-service-review.txt and bouncer metadata in sanitized
+live-cloud.warren.json/runtime-cloud.warren.json. Prior live metadata reports
+NODE_VERSION=22.23.1 on master; this task did not query production again.
+
+Commands and results
+- git ls-remote origin refs/heads/master: matched base revision above.
+- npm audit --json (before): 4 package findings: 1 high, 2 moderate, 1 low.
+- docker manifest inspect node:22.23.4-alpine: succeeded.
+- npm audit fix --package-lock-only: succeeded without --force or overrides.
+- npm ci: succeeded on host Node 22.23.2, npm 10.9.8.
+- npm test: succeeded, build plus 2/2 tests.
+- npx --no-install tsc --noEmit: succeeded.
+- npm audit: zero vulnerabilities.
+- npm audit --omit=dev: zero vulnerabilities.
+- docker build --pull -t discord-bouncer:security-october-2026 .: succeeded,
+  including full builder npm ci, tsc build and runner npm ci --omit=dev.
+  Pulled base index digest:
+  sha256:ce8d97f7cfc7c5386421eb932df20a29df99b1a7f469f6157d5c9956702ffadc
+  Built local image ID:
+  sha256:ea5845ea1cf5e64f627d178ba11612c88b4ff7680a68fb6971d7927aa289b8ee
+- Container regression suite: docker create --network none with command
+  node --test test/runtime.test.cjs; docker cp test into /app/test;
+  docker start -a: 2/2 passed against compiled production image. Removed this
+  disposable container and its anonymous volume with docker rm -v.
+  A first bind-mount attempt failed because the host path was not shared;
+  copying test files avoided changing Docker Desktop settings.
+- docker run --rm -i --network none discord-bouncer:security-october-2026 node
+  (version inspection script via stdin): Node v22.23.4, bundled Undici 6.29.1,
+  npm Undici 6.29.1, better-sqlite3 12.10.0, discord.js 14.27.0.
+  An initial inline inspection command lost quotes in PowerShell; stdin fixed it.
+- docker run --rm --network none discord-bouncer:security-october-2026:
+  expected exit 1, Missing required environment variable: DISCORD_TOKEN.
+- docker compose config --no-env-resolution --no-interpolate -q: succeeded;
+  validates structure without reading a production env file or starting services.
+- git diff --check: succeeded.
+
+Limits and outstanding work
+- No pre-existing test or lint scripts/configuration. Added two focused runtime
+  tests; no unrelated lint framework. This bot has no local HTTP/browser UI.
+- No authenticated Discord behavior or command/role actions were exercised.
+  Container checks explicitly disabled networking and supplied no Discord token.
+- SQLite writes occurred only in disposable test directories/containers, never
+  the configured service data volume or an existing database.
+- Installation warns that transitive prebuild-install@7.1.3 is deprecated.
+  Native installs and SQLite checks pass; npm reports no advisory for it. No
+  speculative dependency replacement was made to suppress that warning.
+- No complete OS/image CVE scan, exploitation assessment or live revalidation.
+- Host Node remains 22.23.2; this task changed the repository's container runtime,
+  not the machine-wide toolchain. Patched runtime validation used the container.
+- Runtime passphrases and attempts retain the existing storage behavior; this
+  dependency/runtime remediation does not redesign access-gate data handling.
+
+Deployment procedure (authorized by the subsequent release request)
+1. Review and commit these changes, then deliver them to the deployment branch.
+2. Build the intended deployment from that revision with a fresh base pull;
+   restarting an existing image does not update Node or npm dependencies.
+3. Redeploy only personal-bouncer, preserving DISCORD_TOKEN and the existing
+   /app/data persistent volume. Do not delete or replace its database.
+4. Verify node --version is v22.23.4 (or a newer patched maintained 22.x), inspect
+   installed dependency versions, and check service logs/Discord readiness.
+5. With explicit authorization, exercise owner setup, denied non-owner commands,
+   failed/successful verification and role assignment in a suitable test guild.
+Production was not modified during the initial local validation recorded above.
